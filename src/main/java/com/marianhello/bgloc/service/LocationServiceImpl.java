@@ -13,6 +13,14 @@ import android.accounts.Account;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.app.AlarmManager; // added
+import android.app.PendingIntent; // added
+import android.widget.Toast; // added
+import android.location.Location; // added
+import android.content.ComponentName; // added
+import android.content.pm.ResolveInfo; // added
+import android.content.pm.PackageManager; // added
+import android.location.LocationManager;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -29,9 +37,12 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Process;
-import android.support.annotation.Nullable;
-import android.support.v4.content.LocalBroadcastManager;
+import android.os.PowerManager;
+import androidx.annotation.Nullable;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
+// import com.marianhello.bgloc.LocationManager; // added
+import com.marianhello.bgloc.BackgroundGeolocationFacade; // added
 import com.marianhello.bgloc.Config;
 import com.marianhello.bgloc.ConnectivityListener;
 import com.marianhello.bgloc.sync.NotificationHelper;
@@ -66,6 +77,16 @@ import static com.marianhello.bgloc.service.LocationServiceIntentBuilder.contain
 import static com.marianhello.bgloc.service.LocationServiceIntentBuilder.containsMessage;
 import static com.marianhello.bgloc.service.LocationServiceIntentBuilder.getCommand;
 import static com.marianhello.bgloc.service.LocationServiceIntentBuilder.getMessage;
+
+import java.util.Timer; // added
+import java.util.TimerTask; // added
+import java.text.SimpleDateFormat; // added
+import java.util.Date; // added
+import java.util.Calendar; // added
+import java.io.FileOutputStream; // added
+import com.github.jparkie.promise.Promise; // added
+import java.util.concurrent.TimeoutException; // added
+import java.util.List; // added
 
 public class LocationServiceImpl extends Service implements ProviderDelegate, LocationService {
 
@@ -121,6 +142,11 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     private String mHeadlessTaskRunnerClass;
     private TaskRunner mHeadlessTaskRunner;
 
+    private AlarmManager alarmMgr; // added
+    private PendingIntent alarmIntent; // added
+    private PowerManager powerManager; // added
+    private PowerManager.WakeLock wakeLock; // added
+
     private long mServiceId = -1;
     private static boolean sIsRunning = false;
     private boolean mIsInForeground = false;
@@ -139,6 +165,30 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         }
     }
 
+    private void addAutoStartup() {
+        try {
+            Intent intent = new Intent();
+            String manufacturer = android.os.Build.MANUFACTURER;
+            if ("xiaomi".equalsIgnoreCase(manufacturer)) {
+                intent.setComponent(new ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"));
+            } else if ("oppo".equalsIgnoreCase(manufacturer)) {
+                intent.setComponent(new ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"));
+            } else if ("vivo".equalsIgnoreCase(manufacturer)) {
+                intent.setComponent(new ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"));
+            } else if ("Letv".equalsIgnoreCase(manufacturer)) {
+                intent.setComponent(new ComponentName("com.letv.android.letvsafe", "com.letv.android.letvsafe.AutobootManageActivity"));
+            } else if ("Honor".equalsIgnoreCase(manufacturer)) {
+                intent.setComponent(new ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"));
+            }
+
+            List<ResolveInfo> list = getPackageManager().queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
+            if  (list.size() > 0) {
+                startActivity(intent);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
     /**
      * When binding to the service, we return an interface to our messenger
      * for sending messages to the service.
@@ -161,6 +211,21 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         logger.debug("All clients have been unbound from service");
 
         return true; // Ensures onRebind() is called when a client re-binds.
+    }
+
+    private void setAlarmTimer() {
+        this.alarmMgr = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        Intent intent = new Intent(this, LocationReportReceiver.class);
+        intent.setAction("sg.gov.homer.location");
+        this.alarmIntent = PendingIntent.getBroadcast(this, 0, intent,  PendingIntent.FLAG_UPDATE_CURRENT);
+
+        Calendar calendar = Calendar.getInstance();
+        long wakeTime = calendar.getTimeInMillis() + 120000;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmMgr.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wakeTime, alarmIntent);
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            alarmMgr.setExact(AlarmManager.RTC_WAKEUP, wakeTime, alarmIntent);
+        }
     }
 
     @Override
@@ -223,6 +288,148 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
 
         registerReceiver(connectivityChangeReceiver, new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION));
         NotificationHelper.registerServiceChannel(this);
+
+        this.powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        this.wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "sg.gov.homer.alarm");
+
+        if(!wakeLock.isHeld()) {
+            wakeLock.acquire();
+        }
+
+        addAutoStartup();
+        setAlarmTimer();
+
+        // Timer timer = new Timer();
+
+        // timer.scheduleAtFixedRate(new TimerTask() {
+        //     @Override
+        //     public void run() {
+                // LocationManager locationManager = LocationManager.getInstance(getApplicationContext());
+                // Promise<Location> promise = locationManager.getCurrentLocation(5000, 0, false);
+                // try {
+                //     promise.await();
+                //     Location location = promise.get();
+                //     if (location != null) {
+                //         Toast.makeText(LocationServiceImpl.this.getApplicationContext(), String.valueOf(location.getLongitude()), Toast.LENGTH_LONG).show();
+                //     }
+
+                //     Throwable error = promise.getError();
+                //     if (error == null) {
+                //         System.out.println("Location not available"); // LOCATION_UNAVAILABLE
+                //     }
+                //     if (error instanceof LocationManager.PermissionDeniedException) {
+                //         System.out.println("Permission denied"); // PERMISSION_DENIED
+                //     }
+                //     if (error instanceof TimeoutException) {
+                //         System.out.println("Location request timed out"); // TIME_OUT
+                //     }
+
+                // } catch (InterruptedException e) {
+                //     System.out.println("Interrupted while waiting location");
+                // }
+
+                // Runnable submitLocation = new Runnable () {
+                //     @Override
+                //     public void run() {
+                //         LocationManager locManager = (LocationManager)getSystemService(Context.LOCATION_SERVICE);
+
+                //         boolean network_enabled = locManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+
+                //         Location location;
+
+                //         if(network_enabled) {
+                //             location = locManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+
+                //             if(location!=null) {
+                //                 longitude = location.getLongitude();
+                //                 latitude = location.getLatitude();
+                //             }
+                //         }
+                //     }
+                // }
+
+                // ThreadUtils.runOnUiThread(new Runnable () {
+                //     @Override
+                //     public void run() {
+                //         LocationManager locManager = (LocationManager)getSystemService(Context.LOCATION_SERVICE);
+
+                //         boolean network_enabled = locManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+
+                //         Location location;
+                //         double longitude = 0;
+                //         double latitude = 0;
+
+                //         if(network_enabled) {
+                //             location = locManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+
+                //             if(location != null) {
+                //                 longitude = location.getLongitude();
+                //                 latitude = location.getLatitude();
+                //             }
+                //         }
+
+                //         String timeStamp = new SimpleDateFormat("yyyy.MM.dd.HH.mm.ss").format(new Date());
+
+                //         try {
+                //             FileOutputStream fout = openFileOutput("locations", MODE_WORLD_READABLE);
+                //             String str = String.valueOf(longitude) + ", " + String.valueOf(latitude) + ", " + timeStamp;
+                //             fout.write(str.getBytes());
+                //             fout.close();
+                //         } catch (Exception e) {
+                //             e.printStackTrace();
+                //         }
+                //         Toast.makeText(LocationServiceImpl.this, "Location successfully sent with coordinates " + String.valueOf(longitude) + ", " + String.valueOf(latitude), Toast.LENGTH_LONG).show();
+                //     }
+                // });
+
+                // BackgroundLocation scheduledLoc = BackgroundLocation.fromLocation(new BackgroundLocation().getLocation());
+                // Toast.makeText(LocationServiceImpl.this.getApplicationContext(), String.valueOf(scheduledLoc.getLongitude()), Toast.LENGTH_LONG).show();
+                // final Promise<Location> promise = LocationManager.getInstance(LocationServiceImpl.this).getCurrentLocation(30000, 0, false);
+                // try {
+                //     promise.await();
+                //     Location scheduledLoc = promise.get();
+                //     Toast.makeText(LocationServiceImpl.this.getApplicationContext(), String.valueOf(scheduledLoc.getLongitude()), Toast.LENGTH_LONG).show();
+                // } catch (InterruptedException e) {
+                //     e.printStackTrace();
+                // }
+                // Toast.makeText(LocationServiceImpl.this.getApplicationContext(),"Making toast", Toast.LENGTH_LONG).show();
+        // }}, 60000, 60000); // 60000 milliseconds = 1 minute
+
+        // BackgroundLocation scheduledLoc = BackgroundLocation.fromLocation(new BackgroundLocation(android.location.LocationManager.NETWORK_PROVIDER).getLocation());
+
+        // LocationManager locationManager = LocationManager.getInstance(getApplicationContext());
+        // Promise<Location> promise = locationManager.getCurrentLocation(5000, 0, false);
+        // try {
+        //     promise.await();
+        //     Location location = promise.get();
+        //     if (location != null) {
+        //         Toast.makeText(this.getApplicationContext(), String.valueOf(location.getLongitude()), Toast.LENGTH_LONG).show();
+        //     }
+
+        //     Throwable error = promise.getError();
+        //     if (error == null) {
+        //         System.out.println("Location not available"); // LOCATION_UNAVAILABLE
+        //     }
+        //     if (error instanceof LocationManager.PermissionDeniedException) {
+        //         System.out.println("Permission denied"); // PERMISSION_DENIED
+        //     }
+        //     if (error instanceof TimeoutException) {
+        //         System.out.println("Location request timed out"); // TIME_OUT
+        //     }
+
+        // } catch (InterruptedException e) {
+        //     System.out.println("Interrupted while waiting location");
+        // }
+
+        // final Promise<Location> promise = locManager.getCurrentLocation(5000, 0, false);
+        // try {
+        //     promise.await();
+        //     Location scheduledLoc = promise.get();
+        //     Toast.makeText(LocationServiceImpl.this.getApplicationContext(), String.valueOf(scheduledLoc.getLongitude()), Toast.LENGTH_LONG).show();
+        // } catch (InterruptedException e) {
+        //     e.printStackTrace();
+        // }
+        // Toast.makeText(LocationServiceImpl.this.getApplicationContext(), "Making toast", Toast.LENGTH_LONG).show();
     }
 
     @Override
@@ -391,6 +598,10 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         if (mProvider != null) {
             mProvider.onStop();
         }
+
+        // if (wakeLock.isHeld()) {
+        //     wakeLock.release();
+        // }
 
         stopForeground(true);
         stopSelf();
@@ -715,6 +926,47 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             logger.info("Network condition changed has connectivity: {}", hasConnectivity);
         }
     };
+
+    public class LocationReportReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent.getAction() == "sg.gov.homer.location") {
+                // ThreadUtils.runOnUiThread(new Runnable () {
+                //     @Override
+                //     public void run() {
+                        LocationManager locManager = (LocationManager)getSystemService(Context.LOCATION_SERVICE);
+
+                        boolean network_enabled = locManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+
+                        Location location;
+                        double longitude = 0;
+                        double latitude = 0;
+
+                        if(network_enabled) {
+                            location = locManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+
+                            if(location != null) {
+                                longitude = location.getLongitude();
+                                latitude = location.getLatitude();
+                            }
+                        }
+
+                        String timeStamp = new SimpleDateFormat("yyyy.MM.dd.HH.mm.ss").format(new Date());
+
+                        try {
+                            FileOutputStream fout = openFileOutput("locations", MODE_WORLD_READABLE);
+                            String str = String.valueOf(longitude) + ", " + String.valueOf(latitude) + ", " + timeStamp;
+                            fout.write(str.getBytes());
+                            fout.close();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                //     }
+                // });
+                setAlarmTimer();
+            }
+        }
+    }
 
     private boolean isNetworkAvailable() {
         ConnectivityManager cm =

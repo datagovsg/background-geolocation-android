@@ -50,6 +50,11 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+        <receiver
+            android:name=".LocationReportReceiver"
+            android:enabled="true"
+            android:exported="true">
+        </receiver>
     </application>
 
     <uses-permission android:name="android.hardware.location" />
