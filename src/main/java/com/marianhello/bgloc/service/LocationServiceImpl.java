@@ -48,6 +48,7 @@ import com.marianhello.bgloc.ConnectivityListener;
 import com.marianhello.bgloc.sync.NotificationHelper;
 import com.marianhello.bgloc.PluginException;
 import com.marianhello.bgloc.PostLocationTask;
+import com.marianhello.bgloc.AlarmEventTask; // added
 import com.marianhello.bgloc.ResourceResolver;
 import com.marianhello.bgloc.data.BackgroundActivity;
 import com.marianhello.bgloc.data.BackgroundLocation;
@@ -139,6 +140,7 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
     private ServiceHandler mServiceHandler;
     private LocationDAO mLocationDAO;
     private PostLocationTask mPostLocationTask;
+    private AlarmEventTask mAlarmEventTask;
     private String mHeadlessTaskRunnerClass;
     private TaskRunner mHeadlessTaskRunner;
 
@@ -286,6 +288,10 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
             }
         });
 
+        // mAlarmEventTask = new AlarmEventTask(getApplication()).getReactNativeHost().getReactInstanceManager().getCurrentReactContext());
+        Context alarmContext = getApplicationContext();
+        mAlarmEventTask = new AlarmEventTask(alarmContext);
+
         registerReceiver(connectivityChangeReceiver, new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION));
         NotificationHelper.registerServiceChannel(this);
 
@@ -297,139 +303,51 @@ public class LocationServiceImpl extends Service implements ProviderDelegate, Lo
         }
 
         addAutoStartup();
-        setAlarmTimer();
+        // setAlarmTimer();
 
-        // Timer timer = new Timer();
+        Timer timer = new Timer();
 
-        // timer.scheduleAtFixedRate(new TimerTask() {
-        //     @Override
-        //     public void run() {
-                // LocationManager locationManager = LocationManager.getInstance(getApplicationContext());
-                // Promise<Location> promise = locationManager.getCurrentLocation(5000, 0, false);
-                // try {
-                //     promise.await();
-                //     Location location = promise.get();
-                //     if (location != null) {
-                //         Toast.makeText(LocationServiceImpl.this.getApplicationContext(), String.valueOf(location.getLongitude()), Toast.LENGTH_LONG).show();
-                //     }
+        timer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                ThreadUtils.runOnUiThread(new Runnable () {
+                    @Override
+                    public void run() {
+                        LocalBroadcastManager localBroadcastManager = LocalBroadcastManager.getInstance(getApplicationContext());
+                        Intent customEvent = new Intent("my-custom-event");
+                        customEvent.putExtra("my-extra-data", "that's it");
+                        localBroadcastManager.sendBroadcast(customEvent);
+                        // LocationManager locManager = (LocationManager)getSystemService(Context.LOCATION_SERVICE);
 
-                //     Throwable error = promise.getError();
-                //     if (error == null) {
-                //         System.out.println("Location not available"); // LOCATION_UNAVAILABLE
-                //     }
-                //     if (error instanceof LocationManager.PermissionDeniedException) {
-                //         System.out.println("Permission denied"); // PERMISSION_DENIED
-                //     }
-                //     if (error instanceof TimeoutException) {
-                //         System.out.println("Location request timed out"); // TIME_OUT
-                //     }
+                        // boolean network_enabled = locManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
 
-                // } catch (InterruptedException e) {
-                //     System.out.println("Interrupted while waiting location");
-                // }
+                        // Location location;
+                        // double longitude = 0;
+                        // double latitude = 0;
 
-                // Runnable submitLocation = new Runnable () {
-                //     @Override
-                //     public void run() {
-                //         LocationManager locManager = (LocationManager)getSystemService(Context.LOCATION_SERVICE);
+                        // if(network_enabled) {
+                        //     location = locManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
 
-                //         boolean network_enabled = locManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+                        //     if(location != null) {
+                        //         longitude = location.getLongitude();
+                        //         latitude = location.getLatitude();
+                        //     }
+                        // }
 
-                //         Location location;
+                        // String timeStamp = new SimpleDateFormat("yyyy.MM.dd.HH.mm.ss").format(new Date());
 
-                //         if(network_enabled) {
-                //             location = locManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-
-                //             if(location!=null) {
-                //                 longitude = location.getLongitude();
-                //                 latitude = location.getLatitude();
-                //             }
-                //         }
-                //     }
-                // }
-
-                // ThreadUtils.runOnUiThread(new Runnable () {
-                //     @Override
-                //     public void run() {
-                //         LocationManager locManager = (LocationManager)getSystemService(Context.LOCATION_SERVICE);
-
-                //         boolean network_enabled = locManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
-
-                //         Location location;
-                //         double longitude = 0;
-                //         double latitude = 0;
-
-                //         if(network_enabled) {
-                //             location = locManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-
-                //             if(location != null) {
-                //                 longitude = location.getLongitude();
-                //                 latitude = location.getLatitude();
-                //             }
-                //         }
-
-                //         String timeStamp = new SimpleDateFormat("yyyy.MM.dd.HH.mm.ss").format(new Date());
-
-                //         try {
-                //             FileOutputStream fout = openFileOutput("locations", MODE_WORLD_READABLE);
-                //             String str = String.valueOf(longitude) + ", " + String.valueOf(latitude) + ", " + timeStamp;
-                //             fout.write(str.getBytes());
-                //             fout.close();
-                //         } catch (Exception e) {
-                //             e.printStackTrace();
-                //         }
-                //         Toast.makeText(LocationServiceImpl.this, "Location successfully sent with coordinates " + String.valueOf(longitude) + ", " + String.valueOf(latitude), Toast.LENGTH_LONG).show();
-                //     }
-                // });
-
-                // BackgroundLocation scheduledLoc = BackgroundLocation.fromLocation(new BackgroundLocation().getLocation());
-                // Toast.makeText(LocationServiceImpl.this.getApplicationContext(), String.valueOf(scheduledLoc.getLongitude()), Toast.LENGTH_LONG).show();
-                // final Promise<Location> promise = LocationManager.getInstance(LocationServiceImpl.this).getCurrentLocation(30000, 0, false);
-                // try {
-                //     promise.await();
-                //     Location scheduledLoc = promise.get();
-                //     Toast.makeText(LocationServiceImpl.this.getApplicationContext(), String.valueOf(scheduledLoc.getLongitude()), Toast.LENGTH_LONG).show();
-                // } catch (InterruptedException e) {
-                //     e.printStackTrace();
-                // }
-                // Toast.makeText(LocationServiceImpl.this.getApplicationContext(),"Making toast", Toast.LENGTH_LONG).show();
-        // }}, 60000, 60000); // 60000 milliseconds = 1 minute
-
-        // BackgroundLocation scheduledLoc = BackgroundLocation.fromLocation(new BackgroundLocation(android.location.LocationManager.NETWORK_PROVIDER).getLocation());
-
-        // LocationManager locationManager = LocationManager.getInstance(getApplicationContext());
-        // Promise<Location> promise = locationManager.getCurrentLocation(5000, 0, false);
-        // try {
-        //     promise.await();
-        //     Location location = promise.get();
-        //     if (location != null) {
-        //         Toast.makeText(this.getApplicationContext(), String.valueOf(location.getLongitude()), Toast.LENGTH_LONG).show();
-        //     }
-
-        //     Throwable error = promise.getError();
-        //     if (error == null) {
-        //         System.out.println("Location not available"); // LOCATION_UNAVAILABLE
-        //     }
-        //     if (error instanceof LocationManager.PermissionDeniedException) {
-        //         System.out.println("Permission denied"); // PERMISSION_DENIED
-        //     }
-        //     if (error instanceof TimeoutException) {
-        //         System.out.println("Location request timed out"); // TIME_OUT
-        //     }
-
-        // } catch (InterruptedException e) {
-        //     System.out.println("Interrupted while waiting location");
-        // }
-
-        // final Promise<Location> promise = locManager.getCurrentLocation(5000, 0, false);
-        // try {
-        //     promise.await();
-        //     Location scheduledLoc = promise.get();
-        //     Toast.makeText(LocationServiceImpl.this.getApplicationContext(), String.valueOf(scheduledLoc.getLongitude()), Toast.LENGTH_LONG).show();
-        // } catch (InterruptedException e) {
-        //     e.printStackTrace();
-        // }
-        // Toast.makeText(LocationServiceImpl.this.getApplicationContext(), "Making toast", Toast.LENGTH_LONG).show();
+                        // try {
+                        //     FileOutputStream fout = openFileOutput("locations", MODE_WORLD_READABLE);
+                        //     String str = String.valueOf(longitude) + ", " + String.valueOf(latitude) + ", " + timeStamp;
+                        //     fout.write(str.getBytes());
+                        //     fout.close();
+                        // } catch (Exception e) {
+                        //     e.printStackTrace();
+                        // }
+                        // Toast.makeText(LocationServiceImpl.this, "Location successfully sent with coordinates " + String.valueOf(longitude) + ", " + String.valueOf(latitude), Toast.LENGTH_LONG).show();
+                    }
+                });
+        }}, 60000, 60000); // 60000 milliseconds = 1 minute
     }
 
     @Override
